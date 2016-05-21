@@ -13,6 +13,7 @@ This program is designed to be run frequently - as often as daily - and undertak
 - condenses the Vector LOG file
 - sysmods the system catalogs for every database
 - cleans up and deletes unused files for every database
+- optionally backs up user databases (turned off by default)
 - backs up iidbdb, keeping three backups (by default)
 - then restarts external access again
 
@@ -28,11 +29,22 @@ One param: Installation id of the installation to use. Assumes there is a .ingXX
 Multiple params after installation id: optional list of databases within this installation to housekeep. If none provided, will work through all databases in installation except iidbdb and imadb
 
 
-If you have table-specific modify scripts, place them in a folder named after the 
-database with a <tablename>.sql file name extension.
+If you have table-specific modify scripts, place them in a folder named after the database with a <tablename>.sql file name extension.
 
 If you have a table-specific optimizedb command-line, place it in the same folder and named matching the table name, but with a .opt file name extension and it will be used instead of the default operation.
 Note that this must be the whole optimizedb command-line, not just the options.
-The default optimizedb operation looks at key columns only (i.e. -zk) and also depends on the size of the table, introducing sampling of data for larger tables.
+The default optimizedb operation looks at key columns only (i.e. -zk) but also depends on the size of the table, fixing the max size of the histograms at 4000 cells for tables more than 30k rows.
+
+BEWARE: default behaviour is to gather stats on all columns of all tables, so for really wide tables, this will take a long time. In cases like this, please adopt the table-specific method to pick out only columns used in WHERE clauses, using the -r <tablename> and -a <column name> flags to optimizedb.
 
 Output gets logged to $HOUSEKEEPING_LOG, or else /tmp if this variable is not set.
+
+## What housekeeping does it not do ?
+
+It does not automatically housekeep the various log files in an installation, but maybe it should do this. This should really be handled by logrotate though, same as all other log files on Linux.
+
+It does not automatically turn on INFO level logging - but maybe it should. This makes it possible to see query times in vectorwise.log, as well as other information.
+
+It does not automatically turn on global gathering of query profiles - but maybe it should.
+
+It does not automatically turn on gathering of query trace information via trace point SC930 - but maybe it should.

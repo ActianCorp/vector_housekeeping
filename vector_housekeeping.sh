@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright 2014 Actian Corporation
+# Copyright 2016 Actian Corporation
 #
 # Program Ownership and Restrictions.
 #
@@ -48,28 +48,38 @@
 #   1.0 07-Jan-2016 (sean.paton@actian.com)
 #       Original version.
 #   1.1 07-May-2016 (david.postle@actian.com)
-#       Added table-skew detection, and made Windows-compatible.
+#       Added table-skew detection, partition checks, and made Windows-compatible.
 
 # TODO
 # Could make elements of this switchable to daily/weekly operations via param file.
-# Could split out the database operations to allow them to be run by the DBA, not the installation
+# Could split out the database operations to allow them to be run by the DBA, not just the installation
 # owner.
+# Could count how many update propagation events happened today, and warn user if more than one or two.
+# Could also count how many LOG condense operations happened automatically and suggest a larger log file 
+# if there were lots of them
 
 # Set up some high-level params here to make them easier to modify if needed.
 # What ratio is too big for smallest partition to largest ?
 SKEW_THRESH=5
+
 # How many backups of the master database should we keep ?
-IIDBDB_CKPS=3
+IIDBDB_BACKUPS_RETAIN=3
+
 # What is the largest percentage of the bufferpool for a non-partitioned table ?
 MAX_NP_BLOCKS_PCT=5
 
+# Should we back up non-system databases, and if so, how many to keep ?
+BACKUP_USER_DATABASES=0
+USER_DATABASE_BACKUP_RETAIN=3
+
 MESSAGE ()
 {
-    # Quit if the message is flagged as an Error
-	echo "${1} : ${DBNAME} : `date +"${DATE}"` : $*"
+    # Quit if the message is flagged as a Fatal Error, otherwise keep going
+    # Most errors should not prevent further housekeeping from continuing
+	echo "${DBNAME} : `date +"${DATE}"` : $*"
 
     # If the message is an alert, could flag that up here
-	if [ "${1}" == "ERROR" ]
+	if [ "${1}" == "FATAL" ]
     then
         # If there is a problem and we already shut down the net servers, try to restart them before exiting
         if [ $CLOSED_INSTALLATION -eq 1 ]
@@ -77,6 +87,9 @@ MESSAGE ()
             ingstart -iigcd 
             ingstart -iigcc
         fi
+
+        # Remove the control flag so we can re-run housekeeping again in the event of an error
+        rm "${HOUSEKEEPING_LOG}/vector_housekeeping_control${ID}.pid"
 
         exit 1
     fi
@@ -93,16 +106,18 @@ then
     echo "This program undertakes a number of housekeeping tasks for the named Vector installation"
     echo "including: 'modify to combine' on all databases, reconstruct all non-Vector tables, "
     echo "optimize all tables, check for data skew for all partitioned tables, condense the LOG "
-    echo "file, sysmod the system catalogs, cleanup unused files, and finally backup iidbdb, "
+    echo "file, sysmod the system catalogs, cleanup unused files, check for large tables that are"
+    echo "not partitioned but really should be, checks that partitioned tables are a multiple of the"
+    echo "number of nodes (for VectorH only), and finally backs up iidbdb, "
     echo "keeping three backups (by default)."
     echo
     echo "It must be run only by the installation owner."
     echo
     echo "If you have table-specific modify scripts, place them in a folder named after the "
-    echo "database with a <tablename>.sql file name."
+    echo "database with a <tablename>.sql file name extension."
     echo
     echo "If you have a table-specific optimizedb command-line, place it in the same folder but "
-    echo "with a .opt extension and it will be used instead of the default operation."
+    echo "with a .opt file extension and it will be used instead of the default operation."
     echo "Note that this must be the whole optimizedb command-line, not just the options."
     echo "The default optimizedb operation depends on the size of the table."
     echo
@@ -127,17 +142,17 @@ then
     if [ `ingprenv | grep II_INSTALLATION | cut -d= -f2` != "$ID" ]
     then
         MESSAGE="Requested housekeeping for installation $ID but cannot find that installation."
-        MESSAGE ERROR $MESSAGE
+        MESSAGE FATAL $MESSAGE
     fi
 else
     MESSAGE="Requested housekeeping for installation $ID but cannot find that installation."
-    MESSAGE ERROR $MESSAGE
+    MESSAGE FATAL $MESSAGE
 fi
 
 INST_OWNER=`ls -ld "${II_SYSTEM}/ingres/bin" | awk '{print $3}'`
 if [ `whoami` != "$INST_OWNER" ] ; then
     MESSAGE="ERROR: Only user $INST_OWNER may run this `basename $0` script."
-    MESSAGE ERROR $MESSAGE
+    MESSAGE FATAL $MESSAGE
 fi
 
 if [[ -z $HOUSEKEEPING_LOG ]]
@@ -148,12 +163,12 @@ fi
 
 if [[ -f "${HOUSEKEEPING_LOG}/vector_housekeeping_control${ID}.pid" ]]
 then
-    echo "ERROR: Script `basename $0` already running for installation $ID."
+    echo "FATAL: Script `basename $0` already running for installation $ID."
     exit 1
 fi
 
 MESSAGE="Cannot write pid to temp folder $HOUSEKEEPING_LOG."
-echo $$ >"${HOUSEKEEPING_LOG}"/vector_housekeeping_control${ID}.pid || MESSAGE ERROR $MESSAGE
+echo $$ >"${HOUSEKEEPING_LOG}"/vector_housekeeping_control${ID}.pid || MESSAGE FATAL $MESSAGE
 
 MESSAGE="Closing installation $ID to connections to begin housekeeping."
 MESSAGE MESSAGE $MESSAGE
@@ -165,10 +180,10 @@ export CLOSED_INSTALLATION=1
 
 if [ $# -gt 0 ]
 then
-	# Only processing some named databases, so build an index of these now.
+	# Only processing some named databases, so build an index of these now from command line params.
     DBLIST=$@
 else
-    # Processing all databases, so get a list of these
+    # Processing all databases, so get a list of these from infodb
     DBLIST=`infodb -databases | grep -v "iidbdb" | grep -v "imadb" `
 fi
 
@@ -181,7 +196,7 @@ do
 done
 
 # Is this a VectorH installation ?
-if [ -f $II_SYSTEM/ingres/files/slaves ]
+if [ -f "$II_SYSTEM/ingres/files/slaves" ]
 then
     NUM_NODES=`cat $II_SYSTEM/ingres/files/hdfs/slaves|wc -l`
     VECTORH=1
@@ -202,14 +217,11 @@ do
     TMPFILE="${HOUSEKEEPING_LOG}/tabledata_${DBNAME}.log"
     if [[ -f ${TMPFILE} ]]
     then
-        rm ${TMPFILE} 2> /dev/null
+        rm "${TMPFILE}" 2> /dev/null
     fi
 
+    # Don't delete the housekeeping log file, so we keep a record of what we've done
     HOUSEKEEPINGFILE="${HOUSEKEEPING_LOG}/vector_housekeeping_${DBNAME}.log"
-    if [[ -f ${HOUSEKEEPINGFILE} ]]
-    then
-        rm ${HOUSEKEEPINGFILE}
-    fi
 
     # Get the bufferpool size of this database. Used later for table size calculations, but 
     # the value is the same for the whole database so get it now.
@@ -218,15 +230,15 @@ do
     
     # Calculate how many blocks a non-partitioned table can have in this database before
     # we consider it a bit too large for comfort.
-    ((MAX_NP_BLOCKS = ($BUFFER_POOL_BYTES * $MAX_NP_BLOCKS_PCT) / ($BLOCK_SIZE_BYTES * 100))
+    ((MAX_NP_BLOCKS=($BUFFER_POOL_BYTES*$MAX_NP_BLOCKS_PCT)/($BLOCK_SIZE_BYTES*100)))
 
-    MESSAGE "MESSAGE" "Starting housekeeping for database ${DBNAME}"
+    MESSAGE MESSAGE "Starting housekeeping for database ${DBNAME}"
 
     # First process the tables in the database. Get a list of these then loop round them.
     # Note that OPTPARAM needs to be last in the following list as it has a bunch of spaces in it
     # which messes up the space-based parsing.
     MESSAGE="Error creating table list. See Log at ${TMPFILE}"
-    sql -s -v" " ${DBNAME} <<EOF >"${TMPFILE}" 2>&1 || MESSAGE WARNING $MESSAGE
+    sql -s -v" " ${DBNAME} <<EOF >"${TMPFILE}" 2>&1 || MESSAGE ERROR $MESSAGE
 \notitles
 \notrim
 SELECT
@@ -239,9 +251,7 @@ storage_structure,
 phys_partitions,
 partition_dimensions as partitioned_flag,
 CASE
-    when num_rows between 0 and 30000 and storage_structure like 'VECTOR%' then '-zk'
-    when num_rows between 30001 and 1000000 and storage_structure like 'VECTOR%' then '-zr4000 -zu4000'
-    when num_rows > 1000001 and storage_structure like 'VECTOR%' then '-zr4000 -zu4000'
+    when num_rows > 30001 and storage_structure like 'VECTOR%' then '-zr4000 -zu4000'
     else '-zk'
 END as param
 FROM iitables
@@ -266,7 +276,7 @@ EOF
            then
            		$MESSAGE="Running table-specific modify script for $TABLE"
            		MESSAGE MESSAGE $MESSAGE
-           		sql -s -v" " ${DBNAME} -u$OWNER <${DBNAME}/${TABLE}.sql >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE "ERROR" "${MESSAGE}"
+           		sql -s -v" " ${DBNAME} -u$OWNER <${DBNAME}/${TABLE}.sql >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE ERROR ${MESSAGE}
            fi
         else
            # Ingres table structure, so rewrite it to reclaim deleted space in the table.
@@ -274,13 +284,13 @@ EOF
            MESSAGE="Modifying ${TABLE} to reconstruct."
            MESSAGE "MESSAGE" $MESSAGE
            echo "modify ${TABLE} to RECONSTRUCT;\p\g" > "${HOUSEKEEPING_LOG}"/reconstruct_${TABLE}.sql
-           sql -s -v" " ${DBNAME} -u$OWNER <"${HOUSEKEEPING_LOG}"/reconstruct_${TABLE}.sql >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE "ERROR" "${MESSAGE}"
+           sql -s -v" " ${DBNAME} -u$OWNER <"${HOUSEKEEPING_LOG}"/reconstruct_${TABLE}.sql >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE ERROR ${MESSAGE}
            rm "${HOUSEKEEPING_LOG}"/reconstruct_${TABLE}.sql
         fi 
 
         # Clear out stats before re-generating them.
         MESSAGE="Removing Statistics From Table (T=${TABLE} O=${OWNER})"
-        statdump -zdl -u${OWNER} ${DBNAME} -r${TABLE} 1>/dev/null || MESSAGE WARNING "${MESSAGE}"
+        statdump -zdl -u${OWNER} ${DBNAME} -r${TABLE} 1>/dev/null || MESSAGE WARNING $MESSAGE
        
         # DP: Need to adjust the following because currently it uses key columns to optimize big tables.
         # If there are none, this is a bit useless. Need to be able to have table-specific optimize parms
@@ -337,8 +347,8 @@ EOF
                 MESSAGE ALERT $MESSAGE
             fi
         else
-            # Look for large tables that are not partitioned, but ought to be. Only really applies to 
-            # VectorH tables - partitioning makes no difference with Vector.
+            # Look for large tables that are not partitioned, but ought to be. Only applies to 
+            # VectorH tables - partitioning makes no real performance difference with Vector.
             if [ $VECTORH -eq 1 ]
             then
                 # How many blocks does this table contain ?
@@ -352,7 +362,7 @@ EOF
             fi
         fi
 
-        # Note that we don't look for really small tables that are partitioned needlessly
+        # Note that we don't look for really small tables that are partitioned needlessly since
         # the overhead of this is not bad enough to be worth bothering about.
     done
 
@@ -371,26 +381,36 @@ EOF
 
     MESSAGE="Running sysmod ${DBNAME}"
     MESSAGE "MESSAGE" $MESSAGE
-    sleep 10
     sysmod ${DBNAME} >>"${HOUSEKEEPINGFILE}" || MESSAGE ERROR $MESSAGE
 
     MESSAGE="Cleaning up unused files for ${DBNAME}"
     MESSAGE MESSAGE $MESSAGE
 
     # Removed unused files left behind from last time, prior to possibly creating new ones next.
+    # This is needed because occasionally files get left behind and 'orphaned' by Vector
     rm "$II_SYSTEM"/ingres/data/vectorwise/${DBNAME}/CBM/unused_* 2>/dev/null
     sql -s -v" " ${DBNAME} -u${DBOWN} <<EOF >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE ERROR $MESSAGE
 call vectorwise (CLEANUP_UNUSED_FILES);\p\g
 EOF
 
+    # Backup this database, if requested
+    if [ $BACKUP_USER_DATABASES -eq 1 ]
+    then
+        MESSAGE="Backing up database $DBNAME"
+        ckpdb -keep=$USER_DATABASE_BACKUP_RETAIN ${DBNAME} >>"${HOUSEKEEPINGFILE}" || MESSAGE ERROR $MESSAGE
+    fi
+
     # Check for log condensation activities and report if there have been a lot ?
     # Check for update propagation activities and report if a lot ?
-    # Run the daily log analysis from here to gather query summary data ?
+    # Run a daily log analysis from here to gather query summary data ?
     # Check the vwinfo analysis for the above ?
     # Also run the lencheck scripts here to advise of poor schema data type choices ?
     rm "${TMPFILE}" 2> /dev/null
     rm "${HOUSEKEEPING_LOG}"/DBOWN.dat 2>/dev/null
 done
+
+DBNAME=iidbdb
+HOUSEKEEPINGFILE="${HOUSEKEEPING_LOG}/vector_housekeeping_${DBNAME}.log"
 
 MESSAGE="Running sysmod of the Master database, iidbdb"
 MESSAGE MESSAGE $MESSAGE
@@ -398,9 +418,7 @@ sysmod iidbdb >>"${HOUSEKEEPINGFILE}"|| MESSAGE ERROR $MESSAGE
 
 MESSAGE="Checkpointing the Master database, iidbdb, and keeping 3 checkpoints."
 MESSAGE MESSAGE $MESSAGE
-# TODO: Make the number of checkpoints configurable
-# TODO: Consider moving iidbdb checkpoints out of daily script and into weekly ?
-ckpdb -keep=$IIDBDB_CKPS iidbdb >>"${HOUSEKEEPINGFILE}" || MESSAGE ERROR $MESSAGE
+ckpdb -keep=$IIDBDB_BACKUPS_RETAIN iidbdb >>"${HOUSEKEEPINGFILE}" || MESSAGE ERROR $MESSAGE
 
 # All done, so re-open installation to users again
 # Note: if on Windows, the following two lines will give an error which is benign, since these
