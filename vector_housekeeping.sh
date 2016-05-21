@@ -67,8 +67,17 @@ MESSAGE ()
 {
     # Quit if the message is flagged as an Error
 	echo "${1} : ${DBNAME} : `date +"${DATE}"` : $*"
+
+    # If the message is an alert, could flag that up here
 	if [ "${1}" == "ERROR" ]
     then
+        # If there is a problem and we already shut down the net servers, try to restart them before exiting
+        if [ $CLOSED_INSTALLATION -eq 1 ]
+        then
+            ingstart -iigcd 
+            ingstart -iigcc
+        fi
+
         exit 1
     fi
 }
@@ -102,6 +111,8 @@ then
     exit 1
 fi
 
+export CLOSED_INSTALLATION=0
+
 ID="$1"
 MESSAGE="Setting installation variables for Installation ${ID} from ~/.ing${ID}sh"
 shift
@@ -132,7 +143,7 @@ fi
 if [[ -z $HOUSEKEEPING_LOG ]]
 then
     # Default the log location
-    HOUSEKEEPING_LOG=/tmp
+    export HOUSEKEEPING_LOG=/tmp
 fi
 
 if [[ -f "${HOUSEKEEPING_LOG}/vector_housekeeping_control${ID}.pid" ]]
@@ -148,8 +159,9 @@ MESSAGE="Closing installation $ID to connections to begin housekeeping."
 MESSAGE MESSAGE $MESSAGE
 
 # Closing installation to external access while housekeeping is running
-#ingstop -iigcc -force
-#ingstop -iigcd -force
+ingstop -iigcc -force
+ingstop -iigcd -force
+export CLOSED_INSTALLATION=1
 
 if [ $# -gt 0 ]
 then
@@ -177,6 +189,9 @@ else
     NUM_NODES=1
     VECTORH=0
 fi
+
+export NUM_NODES
+export VECTORH
 
 
 DBNAME=""
@@ -337,7 +352,8 @@ EOF
             fi
         fi
 
-        # TODO: tell the user if we find a small table that is.
+        # Note that we don't look for really small tables that are partitioned needlessly
+        # the overhead of this is not bad enough to be worth bothering about.
     done
 
     DBOWN=`cat "${HOUSEKEEPING_LOG}"/DBOWN.dat`
