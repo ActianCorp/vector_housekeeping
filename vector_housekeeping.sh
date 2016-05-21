@@ -62,15 +62,19 @@
 # What ratio is too big for smallest partition to largest ?
 SKEW_THRESH=5
 
-# How many backups of the master database should we keep ?
+# Always backup iidbdb, but how many backups of the master database should we keep ?
 IIDBDB_BACKUPS_RETAIN=3
 
-# What is the largest percentage of the bufferpool for a non-partitioned table ?
+# What is the largest percentage of the bufferpool for a non-partitioned table before we alert ?
 MAX_NP_BLOCKS_PCT=5
 
 # Should we back up non-system databases, and if so, how many to keep ?
 BACKUP_USER_DATABASES=0
 USER_DATABASE_BACKUP_RETAIN=3
+
+# Auto-enable query profiling for all queries ? Default is to allocate up to 100Mb for these
+AUTO_ENABLE_PROFILING=0
+PROFILE_PATH=$TEMP
 
 MESSAGE ()
 {
@@ -78,7 +82,7 @@ MESSAGE ()
     # Most errors should not prevent further housekeeping from continuing
 	echo "${DBNAME} : `date +"${DATE}"` : $*"
 
-    # If the message is an alert, could flag that up here
+    # If the message is an alert, could flag that up for more visible alerting, e.g. via email
 	if [ "${1}" == "FATAL" ]
     then
         # If there is a problem and we already shut down the net servers, try to restart them before exiting
@@ -408,6 +412,27 @@ EOF
     rm "${TMPFILE}" 2> /dev/null
     rm "${HOUSEKEEPING_LOG}"/DBOWN.dat 2>/dev/null
 done
+
+# Turn on query profiling if requested. Note that this is an installation-wide setting, not per-database.
+# This should work fine with a default vectorwise.conf, but may be dangerous if user has already modified it
+# because we could end up with a duplicated [server] entry.
+# Also, Vector needs to be restarted for this change to take effect. Default housekeeping doesn't restart server.
+if [ $AUTO_ENABLE_PROFILING -eq 1 ]
+then
+    MESSAGE="Changing vectorwise.conf settings to enable profiling for database $DBNAME"
+    if [ `grep profile_per_query "$II_SYSTEM"/ingres/data/vectorwise/vectorwise.conf | wc -l` -eq 0 ]
+    then
+        # Use print here instead of echo since it's easier to embed newlines and do it all in one go
+        print "%s" "[server]\nprofile_per_query=true\nprofile_per_query_dir=$PROFILE_PATH" >>"$II_SYSTEM"/ingres/data/vectorwise/vectorwise.conf 2>"${HOUSEKEEPINGFILE}" || MESSAGE ERROR $MESSAGE
+    else
+        # Config file already has a profile_per_query setting so need to flip this to true if it's false
+        if [ `grep 'profile_per_query=false' "$II_SYSTEM"/ingres/data/vectorwise/vectorwise.conf | wc -l` -eq 0 ]
+        then
+        fi
+    fi
+fi
+
+
 
 DBNAME=iidbdb
 HOUSEKEEPINGFILE="${HOUSEKEEPING_LOG}/vector_housekeeping_${DBNAME}.log"
