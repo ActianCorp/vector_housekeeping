@@ -43,6 +43,9 @@
 #   and database(s) requested.
 #   See the Usage report below for details of what it does.
 #
+#   Note: There are quotes around pathnames everywhere to make sure that it works ok on a Windows
+#   Vector installation where there are likely spaces in path names.
+#
 #
 # History:
 #   1.0 07-Jan-2016 (sean.paton@actian.com)
@@ -56,7 +59,7 @@
 # owner.
 # Could count how many update propagation events happened today, and warn user if more than one or two.
 # Could also count how many LOG condense operations happened automatically and suggest a larger log file 
-# if there were lots of them
+# if there were lots of them.
 
 # Set up some high-level params here to make them easier to modify if needed.
 # What ratio is too big for smallest partition to largest ?
@@ -416,7 +419,7 @@ done
 # Turn on query profiling if requested. Note that this is an installation-wide setting, not per-database.
 # This should work fine with a default vectorwise.conf, but may be dangerous if user has already modified it
 # because we could end up with a duplicated [server] entry.
-# Also, Vector needs to be restarted for this change to take effect. Default housekeeping doesn't restart server.
+# Also, Vector needs to be restarted for this change to take effect. Default housekeeping doesn't restart the server.
 if [ $AUTO_ENABLE_PROFILING -eq 1 ]
 then
     MESSAGE="Changing vectorwise.conf settings to enable profiling for database $DBNAME"
@@ -428,11 +431,10 @@ then
         # Config file already has a profile_per_query setting so need to flip this to true if it's false
         if [ `grep 'profile_per_query=false' "$II_SYSTEM"/ingres/data/vectorwise/vectorwise.conf | wc -l` -eq 0 ]
         then
+            # TODO: edit in-place on vectorwise.conf file
         fi
     fi
 fi
-
-
 
 DBNAME=iidbdb
 HOUSEKEEPINGFILE="${HOUSEKEEPING_LOG}/vector_housekeeping_${DBNAME}.log"

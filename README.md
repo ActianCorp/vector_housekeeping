@@ -1,5 +1,7 @@
 # Vector Housekeeping
 
+Note that this program is still under development and not ready for Production usage yet. Testing assistance would be appreciated though !
+
 This program is designed to be run frequently - as often as daily - and undertakes a number of housekeeping tasks for a Vector installation: 
 
 - first it closes the installation to external usage by turning off the net servers - so don't run this during your online day !
