@@ -102,6 +102,28 @@ MESSAGE ()
     fi
 }
 
+GET_VWINFO_PARAM ()
+{
+    # Get the desired value from vwinfo, adjusting for Vector vs VectorH output formats
+    # Requires one param - the name of the value to find.
+
+    if [ $# -ne 1 ]
+    then
+        MESSAGE ERROR "Invalid call to GET_VWINFO_PARAM - one required but no params supplied"
+        echo 0
+        return 1
+    fi
+
+    if [ $VECTORH -eq 1 ]
+    then
+        echo `vwinfo -c ${DBNAME}| grep $1 | head -1 | awk -F \| '{print $4}'`
+    else
+        echo `vwinfo -c ${DBNAME}| grep $1 | awk -F \| '{print $3}'`
+    fi
+    
+    return 0
+}
+
 #---------------------------------------------------------------------------#
 
 DATE="%d-%b-%y %H:%M:%S"
@@ -203,7 +225,7 @@ do
 done
 
 # Is this a VectorH installation ?
-if [ -f "$II_SYSTEM/ingres/files/slaves" ]
+if [ -f "$II_SYSTEM/ingres/files/hdfs/slaves" ]
 then
     NUM_NODES=`cat $II_SYSTEM/ingres/files/hdfs/slaves|wc -l`
     VECTORH=1
@@ -232,8 +254,12 @@ do
 
     # Get the bufferpool size of this database. Used later for table size calculations, but 
     # the value is the same for the whole database so get it now.
-    BUFFER_POOL_BYTES=`vwinfo -c ${DBNAME}|grep bufferpool_size | awk -F \| '{print $3}'`
-    BLOCK_SIZE_BYTES=`vwinfo -c ${DBNAME}|grep block_size | awk -F \| '{print $3}'`
+    # Vector and VectorH have different formats for vwinfo -c, so adjust for this.
+
+    BUFFER_POOL_BYTES=`GET_VWINFO_PARAM bufferpool_size`
+    # vwinfo -c ${DBNAME}|grep bufferpool_size | awk -F \| '{print $3}'`
+    BLOCK_SIZE_BYTES=`GET_VWINFO_PARAM  block_size`
+    # BLOCK_SIZE_BYTES=`vwinfo -c ${DBNAME}|grep block_size | awk -F \| '{print $3}'`
     
     # Calculate how many blocks a non-partitioned table can have in this database before
     # we consider it a bit too large for comfort.
@@ -376,14 +402,15 @@ EOF
     DBOWN=`cat "${HOUSEKEEPING_LOG}"/DBOWN.dat`
     MESSAGE="Running Modify to Combine for the whole database."
     MESSAGE MESSAGE $MESSAGE
-    sql -s -v" " ${DBNAME} -u${DBOWN} <<EOF >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE ERROR $MESSAGE
-call vectorwise (COMBINE);\p\g
+    sql -s ${DBNAME} -u${DBOWN} <<EOF >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE ERROR $MESSAGE
+\rt
+call vectorwise (COMBINE);\\p\\g
 EOF
 
 	MESSAGE="Condensing the Vector LOG file"
 	MESSAGE MESSAGE $MESSAGE
-    sql -s -v" " ${DBNAME} -u${DBOWN} <<EOF >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE ERROR $MESSAGE
-call vectorwise (CONDENSE_LOG);\p\g
+    sql -s ${DBNAME} -u${DBOWN} <<EOF >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE ERROR $MESSAGE
+call vectorwise (CONDENSE_LOG);\\p\\g
 EOF
 
     MESSAGE="Running sysmod ${DBNAME}"
@@ -396,8 +423,8 @@ EOF
     # Removed unused files left behind from last time, prior to possibly creating new ones next.
     # This is needed because occasionally files get left behind and 'orphaned' by Vector
     rm "$II_SYSTEM"/ingres/data/vectorwise/${DBNAME}/CBM/unused_* 2>/dev/null
-    sql -s -v" " ${DBNAME} -u${DBOWN} <<EOF >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE ERROR $MESSAGE
-call vectorwise (CLEANUP_UNUSED_FILES);\p\g
+    sql -s ${DBNAME} -u${DBOWN} <<EOF >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE ERROR $MESSAGE
+call vectorwise (CLEANUP_UNUSED_FILES);\\p\\g
 EOF
 
     # Backup this database, if requested
