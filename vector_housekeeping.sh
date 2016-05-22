@@ -432,6 +432,7 @@ then
         if [ `grep 'profile_per_query=false' "$II_SYSTEM"/ingres/data/vectorwise/vectorwise.conf | wc -l` -eq 0 ]
         then
             # TODO: edit in-place on vectorwise.conf file
+            echo Cannot yet edit existing vectorwise.conf file in-place to enable profiling
         fi
     fi
 fi
