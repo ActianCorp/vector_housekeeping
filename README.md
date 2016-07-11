@@ -43,7 +43,7 @@ Output gets logged to $HOUSEKEEPING_LOG, or else /tmp if this variable is not se
 
 ## What housekeeping does it not do ?
 
-It does not automatically housekeep the various log files in an installation, but maybe it should do this. This should really be handled by logrotate though, same as all other log files on Linux.
+It does not automatically housekeep the various log files in an installation. This is handled by the Liniux standard utility logrotate, same as all other log files on Linux, and a sample config file is supplied within this package. Just drop this config file into the logrotate config directory, usually /etc/logrotate.d.
 
 It does not automatically turn on INFO level logging - but maybe it should. This makes it possible to see query times in vectorwise.log, as well as other information.
 
