@@ -307,7 +307,7 @@ EOF
            # on where this script is called from.
            if [[ -f ${DBNAME}/${TABLE}.sql ]]
            then
-           		$MESSAGE="Running table-specific modify script for $TABLE"
+           		MESSAGE="Running table-specific modify script for $TABLE"
            		MESSAGE MESSAGE $MESSAGE
            		sql -s -v" " ${DBNAME} -u$OWNER <${DBNAME}/${TABLE}.sql >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE ERROR ${MESSAGE}
            fi
@@ -332,7 +332,7 @@ EOF
 
         if [[ -f ${DBNAME}/${TABLE}.opt ]]
         then
-            $MESSAGE="Running table-specific optimization script for $TABLE"
+            MESSAGE="Running table-specific optimization script for $TABLE"
             MESSAGE MESSAGE $MESSAGE
             sh ${DBNAME}/${TABLE}.opt >>"${HOUSEKEEPINGFILE}" 2>&1 || MESSAGE ERROR $MESSAGE
         else
