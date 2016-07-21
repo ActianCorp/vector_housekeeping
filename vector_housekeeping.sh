@@ -385,7 +385,7 @@ EOF
             if [ $VECTORH -eq 1 ]
             then
                 # How many blocks does this table contain ?
-                BLOCKS=`vwinfo -T ${TABLE} ${DBNAME} | awk -F \| '/${TABLE}/ {print $4}' | xargs`
+                BLOCKS=`vwinfo -T -t ${TABLE} ${DBNAME} | awk -F \| '/${TABLE}/ {print $4}' | xargs`
                 if [ $BLOCKS -gt $MAX_NP_BLOCKS ]
                 then
                     MESSAGE="Table $TABLE has $BLOCKS VectorH blocks, but this is larger than $MAX_NP_BLOCKS_PCT% of buffer pool size "
