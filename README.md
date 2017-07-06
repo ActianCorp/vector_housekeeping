@@ -1,14 +1,14 @@
 # Vector Housekeeping
 
-Note that this program is still under development and not ready for Production usage yet. Testing assistance would be appreciated though !
+Contributed by Actian Professional Services team, this program is provided as an example only and is not (yet) suitable for Production usage.
 
-This program is designed to be run frequently - as often as daily - and undertakes a number of housekeeping tasks for a Vector installation: 
+This program is designed to be run frequently - as often as daily - and undertakes a number of housekeeping tasks for an Actian Vector or VectorH installation: 
 
-- first it closes the installation to external usage by turning off the net servers - so don't run this during your online day !
+- first it closes the installation to external usage by turning off the network access servers - so don't run this during your online day !
 - `modify to combine` on all databases to force updata propagation
 - `modify to reconstruct` all non-Vector tables
 - does **not** `modify to rewrite` Vectorwise table types by default as this could get very slow
-- runs `optimizedb` on all tables
+- runs `optimizedb` on all tables for all columns (by default - this can be adjusted)
 - check for data skew for all partitioned tables and reports this with an 'alert' message type
 - for VectorH, checks whether partitioned tables have a #partitions isn't a multiple of the number of nodes and if so, reports this with an 'alert' message type
 - checks whether there are very large, non-partitioned tables and alerts about these. 'Too large' is configurable, but defaults to 5% of the buffer pool size, or more.
